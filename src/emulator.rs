@@ -295,8 +295,7 @@ impl Vm {
                 3
             }
             OpCode::RET => {
-                let pc = self.pop().wrapping_add(1);
-                *self.pc_mut() = pc;
+                *self.pc_mut() = self.pop();
                 4
             }
             OpCode::PUSH => {
