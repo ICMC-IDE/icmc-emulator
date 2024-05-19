@@ -300,9 +300,9 @@ impl Vm {
             }
             OpCode::PUSH => {
                 let value = *if *self.ir() & 0b1000000 == 0b1000000 {
-                    self.fr_mut()
+                    self.fr()
                 } else {
-                    self.rx_mut()
+                    self.rx()
                 };
 
                 self.push(value);
