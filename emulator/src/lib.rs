@@ -116,12 +116,18 @@ impl Emulator {
         store(address, value);
     }
 
-    pub fn tick(&mut self, mut ticks: isize) -> isize {
+    pub fn tick(&mut self, ticks: isize) -> isize {
+        let mut handled_ticks = 0;
+
         for n in self {
-            ticks -= n;
+            handled_ticks += n;
+
+            if handled_ticks >= ticks {
+                break;
+            }
         }
 
-        ticks
+        handled_ticks
     }
 
     #[inline(always)]
