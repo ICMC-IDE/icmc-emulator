@@ -1,0 +1,6 @@
+[target.wasm32-unknown-unknown]
+rustflags = ["-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals"]
+
+[unstable]
+mtime-on-use = true
+build-std = ["core", "std", "alloc", "proc_macro", "test", "panic_abort"]

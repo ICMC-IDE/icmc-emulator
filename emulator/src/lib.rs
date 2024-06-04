@@ -1,15 +1,6 @@
+#![feature(bigint_helper_methods, iter_array_chunks)]
+
 use wasm_bindgen::prelude::*;
-
-const REG_FR: u16 = 8;
-const REG_SP: u16 = 9;
-const REG_PC: u16 = 10;
-const REG_IR: u16 = 11;
-
-#[wasm_bindgen]
-struct Vm {
-    memory: [u16; 1 << 16],
-    registers: [u16; 12],
-}
 
 #[wasm_bindgen(raw_module = "../ide.js")]
 extern "C" {
@@ -18,7 +9,28 @@ extern "C" {
     fn store(offset: u16, value: u16);
     fn halt();
     fn breakpoint();
-    fn log(msg: &str);
+}
+
+const REG_FR: u16 = 8;
+const REG_SP: u16 = 9;
+const REG_PC: u16 = 10;
+const REG_IR: u16 = 11;
+
+#[wasm_bindgen]
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum State {
+    Paused,
+    BreakPoint,
+    Halted,
+}
+
+/// Reseting the Emulator is a common task, therefore it is convenient to have a copy of the original memory
+#[wasm_bindgen]
+pub struct Emulator {
+    memory: [u16; 0x10000],
+    memory_copy: [u16; 0x10000],
+    registers: [u16; 12],
+    state: State,
 }
 
 struct OpCode {}
@@ -74,18 +86,28 @@ impl Flags {
 }
 
 #[wasm_bindgen]
-impl Vm {
+impl Emulator {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self {
-            memory: [0; 1 << 16],
+            memory: [0; 0x10000],
+            memory_copy: [0; 0x10000],
             registers: [0, 0, 0, 0, 0, 0, 0, 0, 0, u16::MAX, 0, 0],
+            state: State::Paused,
         }
     }
 
     pub fn load(&mut self, rom: &[u16]) {
-        self.memory[0..rom.len()].copy_from_slice(rom);
+        self.memory_copy[0..rom.len()].copy_from_slice(rom);
+    }
+
+    pub fn reset(&mut self) {
         self.registers = [0, 0, 0, 0, 0, 0, 0, 0, 0, u16::MAX, 0, 0];
+        self.memory = self.memory_copy.clone();
+    }
+
+    pub fn state(&self) -> State {
+        self.state
     }
 
     #[inline(always)]
@@ -94,35 +116,63 @@ impl Vm {
         store(address, value);
     }
 
-    pub fn tick(&mut self) -> u8 {
+    pub fn tick(&mut self, mut ticks: isize) -> isize {
+        for n in self {
+            ticks -= n;
+        }
+
+        ticks
+    }
+
+    #[inline(always)]
+    pub fn memory(&self) -> *const u16 {
+        self.memory.as_ptr()
+    }
+
+    #[inline(always)]
+    pub fn registers(&self) -> *const u16 {
+        self.registers.as_ptr()
+    }
+}
+
+impl Iterator for Emulator {
+    type Item = isize;
+
+    fn next(&mut self) -> Option<Self::Item> {
         self.registers[REG_IR as usize] = self.data();
         let opcode = self.opcode();
+
+        match self.state {
+            State::Halted => return None,
+            State::BreakPoint => self.state = State::Paused,
+            _ => (),
+        };
 
         match opcode {
             OpCode::STORE => {
                 let address = self.data();
                 let x = *self.rx();
                 self.store(address, x);
-                3
+                Some(3)
             }
             OpCode::LOAD => {
                 let address = self.data();
                 *self.rx_mut() = self.memory[address as usize];
-                3
+                Some(3)
             }
             OpCode::STOREI => {
                 let x = *self.rx();
                 self.store(x, self.y());
-                2
+                Some(2)
             }
             OpCode::LOADI => {
                 *self.rx_mut() = self.memory[self.y() as usize];
-                2
+                Some(2)
             }
             OpCode::LOADN => {
                 let number = self.data();
                 *self.rx_mut() = number;
-                2
+                Some(2)
             }
             OpCode::MOV => {
                 let mode = *self.ir() & 0b11;
@@ -136,7 +186,7 @@ impl Vm {
                     0b011 => self.sp_mut(),
                     _ => self.rx_mut(),
                 } = value;
-                2
+                Some(2)
             }
             OpCode::ADD => {
                 let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
@@ -145,7 +195,7 @@ impl Vm {
                 *self.rx_mut() = value;
                 self.set_fr(Flags::CARRY, carry);
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::SUB => {
                 let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
@@ -155,7 +205,7 @@ impl Vm {
                 *self.rx_mut() = value;
                 self.set_fr(Flags::CARRY, carry1 | carry2);
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::MUL => {
                 let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
@@ -166,7 +216,7 @@ impl Vm {
                 *self.rx_mut() = value;
                 self.set_fr(Flags::ARITHMETIC_OVERFLOW, overflow != 0);
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::DIV => {
                 let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
@@ -181,7 +231,7 @@ impl Vm {
                 self.set_fr(Flags::DIV_BY_ZERO, self.z() == 0);
                 self.set_fr(Flags::ARITHMETIC_OVERFLOW, overflow);
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::INCDEC => {
                 let (value, overflow) = if *self.ir() & 0b1000000 == 0b1000000 {
@@ -193,7 +243,7 @@ impl Vm {
                 *self.rx_mut() = value;
                 self.set_fr(Flags::ARITHMETIC_OVERFLOW, overflow);
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::REM => {
                 *self.rx_mut() = if self.z() == 0 {
@@ -203,27 +253,27 @@ impl Vm {
                 };
                 self.set_fr(Flags::DIV_BY_ZERO, self.z() == 0);
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::AND => {
                 *self.rx_mut() = self.y() & self.z();
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::OR => {
                 *self.rx_mut() = self.y() | self.z();
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::XOR => {
                 *self.rx_mut() = self.y() ^ self.z();
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::NOT => {
                 *self.rx_mut() = !self.y();
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::SHIFTROT => {
                 let mode = (*self.ir() & 0b1110000) >> 4;
@@ -250,7 +300,7 @@ impl Vm {
                 *self.rx_mut() = value;
                 self.set_fr(Flags::ARITHMETIC_OVERFLOW, overflow);
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::CMP => {
                 let x = *self.rx();
@@ -262,17 +312,17 @@ impl Vm {
                         std::cmp::Ordering::Greater => Flags::GREATER,
                     };
                 self.fr_zero();
-                2
+                Some(2)
             }
             OpCode::READ => {
                 *self.rx_mut() = read(self.y(), self.z());
-                2
+                Some(2)
             }
             OpCode::WRITE => {
                 let x = *self.rx();
                 let y = self.y();
                 write(x, y);
-                2
+                Some(2)
             }
             OpCode::JMP => {
                 let cond = (*self.ir() & 0b1111000000) >> 6;
@@ -281,7 +331,7 @@ impl Vm {
                 if self.test(cond) {
                     *self.pc_mut() = address;
                 }
-                3
+                Some(3)
             }
             OpCode::CALL => {
                 let cond = (*self.ir() & 0b1111000000) >> 6;
@@ -292,11 +342,11 @@ impl Vm {
                     self.push(pc);
                     *self.pc_mut() = address;
                 }
-                3
+                Some(3)
             }
             OpCode::RET => {
                 *self.pc_mut() = self.pop();
-                4
+                Some(4)
             }
             OpCode::PUSH => {
                 let value = *if *self.ir() & 0b1000000 == 0b1000000 {
@@ -306,7 +356,7 @@ impl Vm {
                 };
 
                 self.push(value);
-                2
+                Some(2)
             }
             OpCode::POP => {
                 let value = self.pop();
@@ -316,40 +366,32 @@ impl Vm {
                 } else {
                     self.rx_mut()
                 } = value;
-                3
+                Some(3)
             }
             OpCode::SETC => {
                 let c = *self.fr() & 0b1000000000 == 0b1000000000;
                 self.set_fr(Flags::CARRY, c);
-                2
+                Some(2)
             }
             OpCode::HALT => {
+                self.state = State::Halted;
                 halt();
-                2
+                None
             }
             OpCode::BKPT => {
+                self.state = State::BreakPoint;
                 breakpoint();
-                2
+                None
             }
-            OpCode::NOP => 2,
+            OpCode::NOP => Some(2),
             _ => {
                 unimplemented!()
             }
         }
     }
-
-    #[inline(always)]
-    pub fn memory(&self) -> *const u16 {
-        self.memory.as_ptr()
-    }
-
-    #[inline(always)]
-    pub fn registers(&self) -> *const u16 {
-        self.registers.as_ptr()
-    }
 }
 
-impl Vm {
+impl Emulator {
     #[inline(always)]
     pub fn data(&mut self) -> u16 {
         let pc = *self.pc();

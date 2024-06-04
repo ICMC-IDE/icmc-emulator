@@ -1,0 +1,12 @@
+[package]
+name = "assembler"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+customasm = "0.13.5"
+wasm-bindgen = { version = "0.2.92" }
+fs = { path = "../fs" }
