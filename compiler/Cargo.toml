@@ -1,5 +1,5 @@
 [package]
-name = "backend"
+name = "compiler"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,8 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+customasm = "0.13.5"
 wasm-bindgen = { version = "0.2.92" }
-assembler = { path = "../assembler" }
+icmc-cc = { git = "https://github.com/Thitav/icmc-cc" }
 fs = { path = "../fs" }
-emulator = { path = "../emulator" }
-compiler = {path = "../compiler" }

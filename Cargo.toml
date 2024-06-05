@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["assembler", "backend", "cli", "emulator", "fs", "mif"]
+members = ["assembler", "backend", "cli", "compiler", "emulator", "fs", "mif"]
 
 [profile.dev]
 panic = "abort"
