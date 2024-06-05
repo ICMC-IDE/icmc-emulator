@@ -104,6 +104,7 @@ impl Emulator {
     pub fn reset(&mut self) {
         self.registers = [0, 0, 0, 0, 0, 0, 0, 0, 0, u16::MAX, 0, 0];
         self.memory = self.memory_copy.clone();
+        self.state = State::Paused;
     }
 
     pub fn state(&self) -> State {
@@ -119,10 +120,10 @@ impl Emulator {
     pub fn tick(&mut self, ticks: isize) -> isize {
         let mut handled_ticks = 0;
 
-        for n in self {
-            handled_ticks += n;
-
-            if handled_ticks >= ticks {
+        while handled_ticks < ticks {
+            if let Some(n) = self.next() {
+                handled_ticks += n;
+            } else {
                 break;
             }
         }
