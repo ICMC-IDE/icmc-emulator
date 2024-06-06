@@ -9,6 +9,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-bindgen = { version = "0.2.92" }
 assembler = { path = "../assembler" }
-fs = { path = "../fs" }
+compiler = { path = "../compiler" }
 emulator = { path = "../emulator" }
-compiler = {path = "../compiler" }
+fs = { path = "../fs" }
