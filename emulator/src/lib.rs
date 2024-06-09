@@ -171,14 +171,14 @@ impl Iterator for Emulator {
     type Item = isize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        *self.ireg_as_mut_ref(IREG_IR) = self.data();
-        let opcode = self.opcode();
-
         match self.state {
             State::Halted => return None,
             State::BreakPoint => self.state = State::Paused,
             _ => (),
         };
+
+        *self.ireg_as_mut_ref(IREG_IR) = self.data();
+        let opcode = self.opcode();
 
         match opcode {
             OpCode::STORE => {
