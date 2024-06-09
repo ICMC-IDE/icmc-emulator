@@ -3,7 +3,7 @@
 
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen(raw_module = "../ide.js")]
+#[wasm_bindgen(raw_module = "../../ide.js")]
 extern "C" {
     fn write(value: u16, offset: u16);
     fn read(value: u16, device: u16) -> u16;
@@ -202,21 +202,21 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::MOV => {
-                let mode = *self.ir() & 0b11;
+                let mode = self.ir() & 0b11;
                 let value = match mode {
-                    0b01 => *self.sp(),
+                    0b01 => self.sp(),
                     0b11 => self.rx(),
                     _ => self.ry(),
                 };
 
                 *match mode {
-                    0b011 => self.sp_mut(),
+                    0b011 => self.sp_as_mut_ref(),
                     _ => self.rx_as_mut_ref(),
                 } = value;
                 Some(2)
             }
             OpCode::ADD => {
-                let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
+                let carry = self.fr() & Flags::CARRY == Flags::CARRY;
                 let (value, carry) = self.ry().carrying_add(self.rz(), self.c() == 0b1 && carry);
 
                 *self.rx_as_mut_ref() = value;
@@ -225,7 +225,7 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::SUB => {
-                let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
+                let carry = self.fr() & Flags::CARRY == Flags::CARRY;
                 let (value, carry1) = self.ry().carrying_add(!self.rz(), self.c() == 0b1 && carry);
                 let (value, carry2) = value.overflowing_add(1);
 
@@ -235,7 +235,7 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::MUL => {
-                let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
+                let carry = self.fr() & Flags::CARRY == Flags::CARRY;
                 let (value, overflow) = self
                     .ry()
                     .carrying_mul(self.rz(), (self.c() == 0b1 && carry) as u16);
@@ -246,7 +246,7 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::DIV => {
-                let carry = *self.fr() & Flags::CARRY == Flags::CARRY;
+                let carry = self.fr() & Flags::CARRY == Flags::CARRY;
                 let (value, overflow) = (if self.rz() == 0 {
                     self.ry()
                 } else {
@@ -261,7 +261,7 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::INCDEC => {
-                let (value, overflow) = if *self.ir() & 0b1000000 == 0b1000000 {
+                let (value, overflow) = if self.ir() & 0b1000000 == 0b1000000 {
                     self.rx().overflowing_sub(0b1)
                 } else {
                     self.rx().overflowing_add(0b1)
@@ -303,24 +303,24 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::SHIFTROT => {
-                let mode = (*self.ir() & 0b1110000) >> 4;
-                let n = *self.ir() & 0b1111;
+                let mode = (self.ir() & 0b1110000) >> 4;
+                let n = self.ir() & 0b1111;
 
                 let (value, overflow) = match mode {
-                    0b000 => (self.rx()).overflowing_shl(n as u32),
+                    0b000 => self.rx().overflowing_shl(n as u32),
                     0b001 => {
-                        let mut res = (self.rx()).overflowing_shl(n as u32);
+                        let mut res = self.rx().overflowing_shl(n as u32);
                         res.0 |= (1 << n) - 1;
                         res
                     }
-                    0b010 => (self.rx()).overflowing_shr(n as u32),
+                    0b010 => self.rx().overflowing_shr(n as u32),
                     0b011 => {
-                        let mut res = (self.rx()).overflowing_shr(n as u32);
+                        let mut res = self.rx().overflowing_shr(n as u32);
                         res.0 |= ((1 << n) - 1) << (16 - n);
                         res
                     }
-                    0b100 | 0b101 => ((self.rx()).rotate_left(n as u32), false),
-                    0b110 | 0b111 => ((self.rx()).rotate_right(n as u32), false),
+                    0b100 | 0b101 => (self.rx().rotate_left(n as u32), false),
+                    0b110 | 0b111 => (self.rx().rotate_right(n as u32), false),
                     _ => unreachable!(),
                 };
 
@@ -332,7 +332,7 @@ impl Iterator for Emulator {
             OpCode::CMP => {
                 let x = self.rx();
 
-                *self.fr_mut() = (*self.fr() & !Flags::COMP)
+                *self.fr_as_mut_ref() = (self.fr() & !Flags::COMP)
                     | match x.cmp(&self.ry()) {
                         core::cmp::Ordering::Less => Flags::LESS,
                         core::cmp::Ordering::Equal => Flags::EQUAL,
@@ -351,37 +351,38 @@ impl Iterator for Emulator {
                 self.vram[y as usize] = x;
                 self.signals[SIG_VF] = self.signals[SIG_VF].wrapping_add(1);
                 write(x, y);
+
                 Some(2)
             }
             OpCode::JMP => {
-                let cond = (*self.ir() & 0b1111000000) >> 6;
+                let cond = (self.ir() & 0b1111000000) >> 6;
                 let address = self.data();
 
                 if self.test(cond) {
-                    *self.pc_mut() = address;
+                    *self.pc_as_mut_ref() = address;
                 }
                 Some(3)
             }
             OpCode::CALL => {
-                let cond = (*self.ir() & 0b1111000000) >> 6;
+                let cond = (self.ir() & 0b1111000000) >> 6;
                 let address = self.data();
 
                 if self.test(cond) {
-                    let pc = *self.pc_mut();
+                    let pc = *self.pc_as_mut_ref();
                     self.push(pc);
-                    *self.pc_mut() = address;
+                    *self.pc_as_mut_ref() = address;
                 }
                 Some(3)
             }
             OpCode::RET => {
-                *self.pc_mut() = self.pop();
+                *self.pc_as_mut_ref() = self.pop();
                 Some(4)
             }
             OpCode::PUSH => {
-                let value = *if *self.ir() & 0b1000000 == 0b1000000 {
+                let value = if self.ir() & 0b1000000 == 0b1000000 {
                     self.fr()
                 } else {
-                    self.rx_as_ref()
+                    self.rx()
                 };
 
                 self.push(value);
@@ -390,15 +391,15 @@ impl Iterator for Emulator {
             OpCode::POP => {
                 let value = self.pop();
 
-                *if *self.ir() & 0b1000000 == 0b1000000 {
-                    self.fr_mut()
+                *if self.ir() & 0b1000000 == 0b1000000 {
+                    self.fr_as_mut_ref()
                 } else {
                     self.rx_as_mut_ref()
                 } = value;
                 Some(3)
             }
             OpCode::SETC => {
-                let c = *self.fr() & 0b1000000000 == 0b1000000000;
+                let c = self.fr() & 0b1000000000 == 0b1000000000;
                 self.set_fr(Flags::CARRY, c);
                 Some(2)
             }
@@ -425,27 +426,27 @@ impl Emulator {
     pub fn data(&mut self) -> u16 {
         let pc = *self.pc();
         let ir = self.ram[pc as usize];
-        *self.pc_mut() = pc.wrapping_add(1);
+        *self.pc_as_mut_ref() = pc.wrapping_add(1);
         ir
     }
 
     #[inline(always)]
     pub fn push(&mut self, value: u16) {
-        self.ram[*self.sp() as usize] = value;
+        self.ram[self.sp() as usize] = value;
 
-        let (sp, underflow) = (*self.sp()).overflowing_sub(1);
+        let (sp, underflow) = self.sp().overflowing_sub(1);
 
-        *self.sp_mut() = sp;
+        *self.sp_as_mut_ref() = sp;
         self.set_fr(Flags::STACK_UNDERFLOW, underflow);
     }
 
     #[inline(always)]
     pub fn pop(&mut self) -> u16 {
-        let (sp, overflow) = (*self.sp()).overflowing_add(1);
+        let (sp, overflow) = self.sp().overflowing_add(1);
 
-        *self.sp_mut() = sp;
+        *self.sp_as_mut_ref() = sp;
         self.set_fr(Flags::STACK_OVERFLOW, overflow);
-        self.ram[*self.sp() as usize]
+        self.ram[self.sp() as usize]
     }
 
     #[inline(always)]
@@ -454,81 +455,81 @@ impl Emulator {
     }
 
     #[inline(always)]
-    pub fn pc_mut(&mut self) -> &mut u16 {
+    pub fn pc_as_mut_ref(&mut self) -> &mut u16 {
         self.reg_as_mut_ref(REG_PC)
     }
 
     #[inline(always)]
-    pub fn sp(&self) -> &u16 {
-        self.reg_as_ref(REG_SP)
+    pub fn sp(&self) -> u16 {
+        self.reg(REG_SP)
     }
 
     #[inline(always)]
-    pub fn sp_mut(&mut self) -> &mut u16 {
+    pub fn sp_as_mut_ref(&mut self) -> &mut u16 {
         self.reg_as_mut_ref(REG_SP)
     }
 
     #[inline(always)]
-    pub fn fr(&self) -> &u16 {
-        self.reg_as_ref(REG_FR)
+    pub fn fr(&self) -> u16 {
+        self.reg(REG_FR)
     }
 
     #[inline(always)]
-    pub fn fr_mut(&mut self) -> &mut u16 {
+    pub fn fr_as_mut_ref(&mut self) -> &mut u16 {
         self.reg_as_mut_ref(REG_FR)
     }
 
     #[inline(always)]
-    pub fn ir(&self) -> &u16 {
-        &self.registers[REG_IR as usize]
+    pub fn ir(&self) -> u16 {
+        self.reg(REG_IR)
     }
 
     #[inline(always)]
     pub fn fr_zero(&mut self) {
         let x = self.rx();
-        let fr = *self.fr();
-        *self.fr_mut() = (fr & !Flags::ULA) | (Flags::ZERO * (x == 0) as u16);
+        let fr = self.fr();
+        *self.fr_as_mut_ref() = (fr & !Flags::ULA) | (Flags::ZERO * (x == 0) as u16);
     }
 
     #[inline(always)]
     pub fn set_fr(&mut self, mask: u16, value: bool) {
-        let fr = *self.fr_mut();
-        *self.fr_mut() = (fr & !mask) | (value as u16 * mask);
+        let fr = *self.fr_as_mut_ref();
+        *self.fr_as_mut_ref() = (fr & !mask) | (value as u16 * mask);
     }
 
     #[inline(always)]
     pub fn rx_as_mut_ref(&mut self) -> &mut u16 {
-        self.reg_as_mut_ref((*self.ir() & 0b0000001110000000) >> 7)
+        self.reg_as_mut_ref((self.ir() & 0b0000001110000000) >> 7)
     }
 
     #[inline(always)]
     pub fn rx_as_ref(&self) -> &u16 {
-        self.reg_as_ref((*self.ir() & 0b0000001110000000) >> 7)
+        self.reg_as_ref((self.ir() & 0b0000001110000000) >> 7)
     }
 
     #[inline(always)]
     pub fn rx(&self) -> u16 {
-        self.reg((*self.ir() & 0b0000001110000000) >> 7)
+        self.reg((self.ir() & 0b0000001110000000) >> 7)
     }
 
     #[inline(always)]
     pub fn ry(&self) -> u16 {
-        self.reg((*self.ir() & 0b0000000001110000) >> 4)
+        self.reg((self.ir() & 0b0000000001110000) >> 4)
     }
 
     #[inline(always)]
     pub fn rz(&self) -> u16 {
-        self.reg((*self.ir() & 0b0000000000001110) >> 1)
+        self.reg((self.ir() & 0b0000000000001110) >> 1)
     }
 
     #[inline(always)]
     pub fn opcode(&mut self) -> u16 {
-        *self.ir() & 0b1111110000000000
+        self.ir() & 0b1111110000000000
     }
 
     #[inline(always)]
     pub fn c(&self) -> u16 {
-        (*self.ir() & 0b0000000000000001) >> 0
+        self.ir() & 0b0000000000000001
     }
 
     #[inline(always)]
@@ -548,7 +549,7 @@ impl Emulator {
 
     #[inline(always)]
     pub fn test(&self, cond: u16) -> bool {
-        let fr = *self.fr();
+        let fr = self.fr();
         match cond {
             0b0000 => true,
             0b0001 if fr & Flags::EQUAL == Flags::EQUAL => true,

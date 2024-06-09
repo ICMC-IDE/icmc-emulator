@@ -7,6 +7,7 @@ use nom::{
     sequence::delimited,
     IResult,
 };
+use wasm_bindgen::prelude::*;
 
 #[derive(Debug)]
 struct Mif {
@@ -14,6 +15,7 @@ struct Mif {
     data_radix: Radix,
     depth: usize,
     width: usize,
+    chunks: Vec<usize>,
 }
 
 #[derive(Default, Debug)]
@@ -177,7 +179,7 @@ fn address_number<'a>(input: &'a str, radix: Radix) -> IResult<&'a str, Address>
     Ok((input, Address { from: num, to: num }))
 }
 
-fn data<'a>(input: &'a str, mif: &Mif) -> IResult<&'a str, Element> {
+fn data<'a>(input: &'a str, mif: &mut Mif) -> IResult<&'a str, Element> {
     let (input, _) = take_while(char::is_whitespace)(input)?;
     let (input, address) = alt((
         |input| address_range(input, mif.address_radix),
@@ -190,17 +192,50 @@ fn data<'a>(input: &'a str, mif: &Mif) -> IResult<&'a str, Element> {
     let (input, _) = tag(";")(input)?;
     let (input, _) = take_while(char::is_whitespace)(input)?;
 
-    Ok((input, Element::Data(address, values)))
+    let mask = (1usize << mif.width as u32).wrapping_sub(1);
+    if address.from == address.to {
+        for (i, mut value) in (address.from..).zip(values.into_iter()) {
+            let offset = i * mif.width;
+            let index = offset / usize::BITS as usize;
+            let shift = offset % usize::BITS as usize;
+
+            value &= mask;
+
+            let (lower_chunk, overflow) = value.overflowing_shl(shift as u32);
+            mif.chunks[index] |= lower_chunk;
+
+            if overflow {
+                mif.chunks[index + 1] |= value >> (usize::BITS as usize - mask);
+            }
+        }
+    } else {
+        for (i, mut value) in (address.from..=address.to).zip(values.into_iter().cycle()) {
+            let offset = i * mif.width;
+            let index = offset / usize::BITS as usize;
+            let shift = offset % usize::BITS as usize;
+
+            value &= mask;
+
+            let (lower_chunk, overflow) = value.overflowing_shl(shift as u32);
+            mif.chunks[index] |= lower_chunk;
+
+            if overflow {
+                mif.chunks[index + 1] |= value >> (usize::BITS as usize - mask);
+            }
+        }
+    }
+
+    Ok((input, Element::Comment))
 }
 
-fn content<'a>(input: &'a str, mif: &Mif) -> IResult<&'a str, ()> {
+fn content<'a>(input: &'a str, mif: &mut Mif) -> IResult<&'a str, ()> {
     let foo = |input: &'a str| -> IResult<&'a str, Element> { data(input, mif) };
 
     let (input, _) = take_while(char::is_whitespace)(input)?;
     let (input, _) = tag("CONTENT")(input)?;
     let (input, _) = many0_count(alt((singleline_comment, multiline_comment)))(input)?;
     let (input, _) = take_while(char::is_whitespace)(input)?;
-    let (input, elements) = delimited(
+    let (input, _) = delimited(
         tag("BEGIN"),
         many0(alt((foo, singleline_comment, multiline_comment))),
         tag("END"),
@@ -208,12 +243,11 @@ fn content<'a>(input: &'a str, mif: &Mif) -> IResult<&'a str, ()> {
     let (input, _) = take_while(char::is_whitespace)(input)?;
     let (input, _) = tag(";")(input)?;
 
-    dbg!(elements);
-
     Ok((input, ()))
 }
 
-pub fn mif(input: &str) -> IResult<&str, ()> {
+#[wasm_bindgen(js_name = "parseMif")]
+pub fn parse_mif(input: &str) -> Option<Vec<u8>> {
     let (input, elements) = many0(alt((
         width,
         depth,
@@ -221,7 +255,8 @@ pub fn mif(input: &str) -> IResult<&str, ()> {
         data_radix,
         multiline_comment,
         singleline_comment,
-    )))(input)?;
+    )))(input)
+    .ok()?;
 
     let result = elements
         .into_iter()
@@ -237,17 +272,30 @@ pub fn mif(input: &str) -> IResult<&str, ()> {
             acc
         });
 
-    let mif = Mif {
-        address_radix: result.address_radix.expect("Missing ADDRESS_RADIX"),
-        data_radix: result.data_radix.expect("Missing DATA_RADIX"),
-        width: result.width.expect("Missing WIDTH"),
-        depth: result.depth.expect("Missing DEPTH"),
+    let address_radix = result.address_radix.expect("Missing ADDRESS_RADIX");
+    let data_radix = result.data_radix.expect("Missing DATA_RADIX");
+    let width = result.width.expect("Missing WIDTH");
+    let depth = result.depth.expect("Missing DEPTH");
+    let size = width * depth / usize::BITS as usize;
+
+    let mut mif = Mif {
+        address_radix,
+        data_radix,
+        width,
+        depth,
+        chunks: Vec::with_capacity(size),
     };
 
-    let (input, content) = content(input, &mif)?;
+    mif.chunks.resize(size, 0);
 
-    dbg!(content);
-    Ok((input, ()))
+    let (input, content) = content(input, &mut mif).ok()?;
+
+    Some(
+        mif.chunks
+            .iter()
+            .flat_map(|byte| byte.to_ne_bytes())
+            .collect(),
+    )
 }
 
 mod test {
