@@ -171,7 +171,7 @@ impl Iterator for Emulator {
     type Item = isize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.registers[IREG_IR as usize] = self.data();
+        *self.ireg_as_mut_ref(IREG_IR) = self.data();
         let opcode = self.opcode();
 
         match self.state {
