@@ -5,20 +5,15 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(raw_module = "../../ide.js")]
 extern "C" {
-    fn write(value: u16, offset: u16);
-    fn read(value: u16, device: u16) -> u16;
     fn store(offset: u16, value: u16);
-    fn halt();
-    fn breakpoint();
 }
 
-const REG_FR: u16 = 8;
-const REG_SP: u16 = 9;
-const REG_PC: u16 = 10;
-const REG_IR: u16 = 11;
-
-const SIG_VF: usize = 0;
-const SIG_KB: usize = 1;
+const IREG_FR: u16 = 0b000000;
+const IREG_SP: u16 = 0b000001;
+const IREG_PC: u16 = 0b000010;
+const IREG_IR: u16 = 0b000011;
+const IREG_KB: u16 = 0b000100;
+const IREG_WC: u16 = 0b000101;
 
 #[wasm_bindgen]
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -34,8 +29,8 @@ pub struct Emulator {
     rom: [u16; 0x10000],
     ram: [u16; 0x10000],
     vram: [u16; 0x10000],
-    registers: [u16; 12],
-    signals: [u16; 2],
+    registers: [u16; 8],
+    internal_registers: [u16; 64],
     state: State,
 }
 
@@ -95,14 +90,17 @@ impl Flags {
 impl Emulator {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {
+        let mut zelf = Self {
             rom: [0; 0x10000],
             ram: [0; 0x10000],
             vram: [0; 0x10000],
-            registers: [0, 0, 0, 0, 0, 0, 0, 0, 0, u16::MAX, 0, 0],
-            signals: [0, 0x00FF],
+            registers: [0; 8],
+            internal_registers: [0; 64],
             state: State::Paused,
-        }
+        };
+
+        zelf.internal_registers[IREG_SP as usize] = u16::MAX;
+        zelf
     }
 
     pub fn load(&mut self, rom: &[u16]) {
@@ -111,9 +109,11 @@ impl Emulator {
     }
 
     pub fn reset(&mut self) {
-        self.registers = [0, 0, 0, 0, 0, 0, 0, 0, 0, u16::MAX, 0, 0];
-        self.ram = self.rom.clone();
+        self.ram = self.rom;
         self.vram = [0; 0x10000];
+        self.registers = [0, 0, 0, 0, 0, 0, 0, 0];
+        self.internal_registers = [0; 64];
+        self.internal_registers[IREG_SP as usize] = u16::MAX;
         self.state = State::Paused;
     }
 
@@ -147,6 +147,11 @@ impl Emulator {
     }
 
     #[inline(always)]
+    pub fn internal_registers(&self) -> *const u16 {
+        self.internal_registers.as_ptr()
+    }
+
+    #[inline(always)]
     pub fn rom(&self) -> *const u16 {
         self.rom.as_ptr()
     }
@@ -166,7 +171,7 @@ impl Iterator for Emulator {
     type Item = isize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.registers[REG_IR as usize] = self.data();
+        self.registers[IREG_IR as usize] = self.data();
         let opcode = self.opcode();
 
         match self.state {
@@ -342,15 +347,15 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::READ => {
-                *self.rx_as_mut_ref() = read(self.ry(), self.rz());
+                *self.rx_as_mut_ref() = self.ireg(IREG_KB);
                 Some(2)
             }
             OpCode::WRITE => {
-                let x = self.rx();
-                let y = self.ry();
-                self.vram[y as usize] = x;
-                self.signals[SIG_VF] = self.signals[SIG_VF].wrapping_add(1);
-                write(x, y);
+                let byte = self.rx();
+                let offset = self.ry();
+
+                self.vram[offset as usize] = byte;
+                *self.ireg_as_mut_ref(IREG_WC) = self.ireg(IREG_WC).wrapping_add(1);
 
                 Some(2)
             }
@@ -380,7 +385,7 @@ impl Iterator for Emulator {
             }
             OpCode::PUSH => {
                 let value = if self.ir() & 0b1000000 == 0b1000000 {
-                    self.fr()
+                    self.ri()
                 } else {
                     self.rx()
                 };
@@ -392,7 +397,7 @@ impl Iterator for Emulator {
                 let value = self.pop();
 
                 *if self.ir() & 0b1000000 == 0b1000000 {
-                    self.fr_as_mut_ref()
+                    self.ri_as_mut_ref()
                 } else {
                     self.rx_as_mut_ref()
                 } = value;
@@ -405,12 +410,10 @@ impl Iterator for Emulator {
             }
             OpCode::HALT => {
                 self.state = State::Halted;
-                halt();
                 None
             }
             OpCode::BKPT => {
                 self.state = State::BreakPoint;
-                breakpoint();
                 None
             }
             OpCode::NOP => Some(2),
@@ -451,37 +454,37 @@ impl Emulator {
 
     #[inline(always)]
     pub fn pc(&self) -> &u16 {
-        self.reg_as_ref(REG_PC)
+        self.ireg_as_ref(IREG_PC)
     }
 
     #[inline(always)]
     pub fn pc_as_mut_ref(&mut self) -> &mut u16 {
-        self.reg_as_mut_ref(REG_PC)
+        self.ireg_as_mut_ref(IREG_PC)
     }
 
     #[inline(always)]
     pub fn sp(&self) -> u16 {
-        self.reg(REG_SP)
+        self.ireg(IREG_SP)
     }
 
     #[inline(always)]
     pub fn sp_as_mut_ref(&mut self) -> &mut u16 {
-        self.reg_as_mut_ref(REG_SP)
+        self.ireg_as_mut_ref(IREG_SP)
     }
 
     #[inline(always)]
     pub fn fr(&self) -> u16 {
-        self.reg(REG_FR)
+        self.ireg(IREG_FR)
     }
 
     #[inline(always)]
     pub fn fr_as_mut_ref(&mut self) -> &mut u16 {
-        self.reg_as_mut_ref(REG_FR)
+        self.ireg_as_mut_ref(IREG_FR)
     }
 
     #[inline(always)]
     pub fn ir(&self) -> u16 {
-        self.reg(REG_IR)
+        self.ireg(IREG_IR)
     }
 
     #[inline(always)]
@@ -500,6 +503,11 @@ impl Emulator {
     #[inline(always)]
     pub fn rx_as_mut_ref(&mut self) -> &mut u16 {
         self.reg_as_mut_ref((self.ir() & 0b0000001110000000) >> 7)
+    }
+
+    #[inline(always)]
+    pub fn ri_as_mut_ref(&mut self) -> &mut u16 {
+        self.ireg_as_mut_ref((self.ir() & 0b0000000000111111) >> 0)
     }
 
     #[inline(always)]
@@ -523,6 +531,11 @@ impl Emulator {
     }
 
     #[inline(always)]
+    pub fn ri(&self) -> u16 {
+        self.ireg((self.ir() & 0b0000000000111111) >> 0)
+    }
+
+    #[inline(always)]
     pub fn opcode(&mut self) -> u16 {
         self.ir() & 0b1111110000000000
     }
@@ -538,13 +551,28 @@ impl Emulator {
     }
 
     #[inline(always)]
+    pub fn ireg_as_mut_ref(&mut self, reg: u16) -> &mut u16 {
+        &mut self.internal_registers[reg as usize]
+    }
+
+    #[inline(always)]
     pub fn reg_as_ref(&self, reg: u16) -> &u16 {
         &self.registers[reg as usize]
     }
 
     #[inline(always)]
+    pub fn ireg_as_ref(&self, reg: u16) -> &u16 {
+        &self.internal_registers[reg as usize]
+    }
+
+    #[inline(always)]
     pub fn reg(&self, reg: u16) -> u16 {
         self.registers[reg as usize]
+    }
+
+    #[inline(always)]
+    pub fn ireg(&self, reg: u16) -> u16 {
+        self.internal_registers[reg as usize]
     }
 
     #[inline(always)]
