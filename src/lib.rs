@@ -3,11 +3,6 @@
 
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen(raw_module = "../../ide.js")]
-extern "C" {
-    fn store(offset: u16, value: u16);
-}
-
 const IREG_FR: u16 = 0b000000;
 const IREG_SP: u16 = 0b000001;
 const IREG_PC: u16 = 0b000010;
@@ -124,7 +119,6 @@ impl Emulator {
     #[inline(always)]
     pub fn store(&mut self, address: u16, value: u16) {
         self.ram[address as usize] = value;
-        store(address, value);
     }
 
     pub fn tick(&mut self, ticks: isize) -> isize {

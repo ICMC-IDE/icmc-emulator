@@ -1,11 +1,15 @@
-[workspace]
-resolver = "2"
-members = ["assembler", "backend", "cli", "compiler", "emulator", "fs"]
+[package]
+name = "emulator"
+version = "0.2.0"
+edition = "2021"
 
-[profile.dev]
-panic = "abort"
-lto = true
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = { version = "0.2.92" }
 
 [profile.release]
 panic = "abort"
-lto = true
+lto = "fat"
+opt-level = 3
