@@ -34,7 +34,6 @@ jobs:
           node-version: "20.x"
           registry-url: "https://npm.pkg.github.com"
       - working-directory: pkg
-        run: npm ci &&
-          npm publish
+        run: npm i && npm ci && npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
