@@ -33,8 +33,7 @@ jobs:
         with:
           node-version: "20.x"
           registry-url: "https://npm.pkg.github.com"
-          run: cp .npmrc pkg/
       - working-directory: pkg
-        run: npm i && npm ci && npm publish
+        run: cp .npmrc pkg/ && npm i && npm ci && npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
