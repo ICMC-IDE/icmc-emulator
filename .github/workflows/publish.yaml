@@ -27,7 +27,7 @@ jobs:
         run: |
           rustup default nightly
           rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-          wasm-pack build --target bundler --reference-types --weak-refs --release --scope icmc-ide
+          wasm-pack build --target web --reference-types --weak-refs --release --scope icmc-ide
 
       - uses: actions/setup-node@v4
         with:
