@@ -27,7 +27,7 @@ jobs:
         run: |
           rustup default nightly
           rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-          wasm-pack build --target bundler --reference-types --weak-refs --release
+          wasm-pack build --target bundler --reference-types --weak-refs --release --scope icmc-ide
 
       - uses: actions/setup-node@v4
         with:
@@ -37,15 +37,8 @@ jobs:
       - working-directory: ./pkg
         run: |
           cp $NPM_CONFIG_USERCONFIG .npmrc
-        #          npm i
-        #          npm ci
-        #          npm publish --registry=https://npm.pkg.github.com/
+          npm i
+          npm ci
+          npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pkg
-          path: ./pkg
-          if-no-files-found: error
-          overwrite: true
