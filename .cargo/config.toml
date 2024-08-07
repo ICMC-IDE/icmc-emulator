@@ -1,5 +1,7 @@
 [target.wasm32-unknown-unknown]
-rustflags = ["-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals"]
+rustflags = [
+    "-Ctarget-feature=+atomics,+bulk-memory,+exception-handling,+extended-const,+multivalue,+mutable-globals,+nontrapping-fptoint,+reference-types,+sign-ext,+simd128,+multimemory",
+]
 
 [unstable]
 mtime-on-use = true

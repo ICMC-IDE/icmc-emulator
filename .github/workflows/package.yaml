@@ -1,0 +1,40 @@
+name: wasmpack
+
+defaults:
+  run:
+    shell: bash
+on:
+  release:
+    types: [published]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install Rust Nightly
+        run: rustup default nightly && rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+
+      - name: Build
+        run: wasm-pack build --target web --reference-types --weak-refs --release --no-pack
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          registry-url: "https://npm.pkg.github.com"
+      - working-directory: pkg
+        run: npm ci &&
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

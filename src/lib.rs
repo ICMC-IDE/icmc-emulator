@@ -1,5 +1,5 @@
 #![no_std]
-#![feature(bigint_helper_methods, iter_array_chunks)]
+#![feature(bigint_helper_methods)]
 
 use wasm_bindgen::prelude::*;
 
@@ -9,6 +9,7 @@ const IREG_PC: u16 = 0b000010;
 const IREG_IR: u16 = 0b000011;
 const IREG_KB: u16 = 0b000100;
 const IREG_WC: u16 = 0b000101;
+// const IREG_ST: u16 = 0b000110;
 
 #[wasm_bindgen]
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -16,6 +17,7 @@ pub enum State {
     Paused,
     BreakPoint,
     Halted,
+    UnknownInstruction,
 }
 
 /// Reseting the Emulator is a common task, therefore it is convenient to have a copy of the original memory
@@ -320,7 +322,10 @@ impl Iterator for Emulator {
                     }
                     0b100 | 0b101 => (self.rx().rotate_left(n as u32), false),
                     0b110 | 0b111 => (self.rx().rotate_right(n as u32), false),
-                    _ => unreachable!(),
+                    _ => {
+                        self.state = State::UnknownInstruction;
+                        return None;
+                    }
                 };
 
                 *self.rx_as_mut_ref() = value;
@@ -412,7 +417,8 @@ impl Iterator for Emulator {
             }
             OpCode::NOP => Some(2),
             _ => {
-                unimplemented!()
+                self.state = State::UnknownInstruction;
+                None
             }
         }
     }
