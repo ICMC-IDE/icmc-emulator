@@ -97,6 +97,7 @@ impl Emulator {
         };
 
         zelf.internal_registers[IREG_SP as usize] = u16::MAX;
+        zelf.internal_registers[IREG_KB as usize] = 0xFF;
         zelf
     }
 
@@ -111,6 +112,7 @@ impl Emulator {
         self.registers = [0, 0, 0, 0, 0, 0, 0, 0];
         self.internal_registers = [0; 64];
         self.internal_registers[IREG_SP as usize] = u16::MAX;
+        self.internal_registers[IREG_KB as usize] = 0xFF;
         self.state = State::Paused;
     }
 
