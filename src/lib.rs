@@ -1,6 +1,9 @@
 #![no_std]
 #![feature(bigint_helper_methods)]
 
+extern crate alloc;
+
+use alloc::boxed::Box;
 use wasm_bindgen::prelude::*;
 
 const IREG_FR: u16 = 0b000000;
@@ -23,9 +26,9 @@ pub enum State {
 /// Reseting the Emulator is a common task, therefore it is convenient to have a copy of the original memory
 #[wasm_bindgen]
 pub struct Emulator {
-    rom: [u16; 0x10000],
-    ram: [u16; 0x10000],
-    vram: [u16; 0x10000],
+    rom: Box<[u16; 0x10000]>,
+    ram: Box<[u16; 0x10000]>,
+    vram: Box<[u16; 0x10000]>,
     registers: [u16; 8],
     internal_registers: [u16; 64],
     state: State,
@@ -88,9 +91,9 @@ impl Emulator {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         let mut zelf = Self {
-            rom: [0; 0x10000],
-            ram: [0; 0x10000],
-            vram: [0; 0x10000],
+            rom: Box::new([0; 0x10000]),
+            ram: Box::new([0; 0x10000]),
+            vram: Box::new([0; 0x10000]),
             registers: [0; 8],
             internal_registers: [0; 64],
             state: State::Paused,
@@ -107,8 +110,8 @@ impl Emulator {
     }
 
     pub fn reset(&mut self) {
-        self.ram = self.rom;
-        self.vram = [0; 0x10000];
+        self.ram = self.rom.clone();
+        self.vram = Box::new([0; 0x10000]);
         self.registers = [0, 0, 0, 0, 0, 0, 0, 0];
         self.internal_registers = [0; 64];
         self.internal_registers[IREG_SP as usize] = u16::MAX;
