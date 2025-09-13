@@ -111,7 +111,7 @@ impl Emulator {
 
     pub fn reset(&mut self) {
         self.ram = self.rom.clone();
-        self.vram = Box::new([0; 0x10000]);
+        self.vram.fill(0);
         self.registers = [0, 0, 0, 0, 0, 0, 0, 0];
         self.internal_registers = [0; 64];
         self.internal_registers[IREG_SP as usize] = u16::MAX;
