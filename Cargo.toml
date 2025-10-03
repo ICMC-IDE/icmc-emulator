@@ -1,13 +1,12 @@
 [package]
 name = "icmc-emulator"
-version = "0.2.2"
-edition = "2021"
+version = "0.3.0"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-bindgen = { version = "0.2.92" }
 
 [profile.release]
 panic = "abort"

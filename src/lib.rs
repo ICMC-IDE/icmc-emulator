@@ -1,10 +1,4 @@
-#![no_std]
 #![feature(bigint_helper_methods)]
-
-extern crate alloc;
-
-use alloc::boxed::Box;
-use wasm_bindgen::prelude::*;
 
 const IREG_FR: u16 = 0b000000;
 const IREG_SP: u16 = 0b000001;
@@ -12,9 +6,7 @@ const IREG_PC: u16 = 0b000010;
 const IREG_IR: u16 = 0b000011;
 const IREG_KB: u16 = 0b000100;
 const IREG_WC: u16 = 0b000101;
-// const IREG_ST: u16 = 0b000110;
 
-#[wasm_bindgen]
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum State {
     Paused,
@@ -24,11 +16,10 @@ pub enum State {
 }
 
 /// Reseting the Emulator is a common task, therefore it is convenient to have a copy of the original memory
-#[wasm_bindgen]
 pub struct Emulator {
-    rom: Box<[u16; 0x10000]>,
-    ram: Box<[u16; 0x10000]>,
-    vram: Box<[u16; 0x10000]>,
+    rom: Box<[u16]>,
+    ram: Box<[u16]>,
+    vram: Box<[u16]>,
     registers: [u16; 8],
     internal_registers: [u16; 64],
     state: State,
@@ -86,9 +77,8 @@ impl Flags {
     const ZERO: u16 = 0b0000000000001000;
 }
 
-#[wasm_bindgen]
+/// Public interface for the emulator.
 impl Emulator {
-    #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         let mut zelf = Self {
             rom: Box::new([0; 0x10000]),
@@ -104,13 +94,13 @@ impl Emulator {
         zelf
     }
 
-    pub fn load(&mut self, rom: &[u16]) {
-        self.rom[0..rom.len()].copy_from_slice(rom);
+    pub fn load_program(&mut self, rom: &[u16]) {
+        self.rom.copy_from_slice(rom);
         self.reset();
     }
 
     pub fn reset(&mut self) {
-        self.ram = self.rom.clone();
+        self.ram.copy_from_slice(&self.rom);
         self.vram.fill(0);
         self.registers = [0, 0, 0, 0, 0, 0, 0, 0];
         self.internal_registers = [0; 64];
@@ -119,12 +109,15 @@ impl Emulator {
         self.state = State::Paused;
     }
 
-    pub fn state(&self) -> State {
+    pub const fn state(&self) -> State {
         self.state
     }
 
-    #[inline(always)]
-    pub fn store(&mut self, address: u16, value: u16) {
+    pub const fn load(&self, address: u16) -> u16 {
+        self.ram[address as usize]
+    }
+
+    pub const fn store(&mut self, address: u16, value: u16) {
         self.ram[address as usize] = value;
     }
 
@@ -142,29 +135,162 @@ impl Emulator {
         handled_ticks
     }
 
-    #[inline(always)]
-    pub fn registers(&self) -> *const u16 {
-        self.registers.as_ptr()
+    pub const fn registers(&self) -> &[u16] {
+        &self.registers
     }
 
-    #[inline(always)]
-    pub fn internal_registers(&self) -> *const u16 {
-        self.internal_registers.as_ptr()
+    pub const fn internal_registers(&self) -> &[u16] {
+        &self.internal_registers
     }
 
-    #[inline(always)]
-    pub fn rom(&self) -> *const u16 {
-        self.rom.as_ptr()
+    pub const fn rom(&self) -> &[u16] {
+        &self.rom
     }
 
-    #[inline(always)]
-    pub fn ram(&self) -> *const u16 {
-        self.ram.as_ptr()
+    pub const fn ram(&self) -> &[u16] {
+        &self.ram
     }
 
-    #[inline(always)]
-    pub fn vram(&self) -> *const u16 {
-        self.vram.as_ptr()
+    pub const fn vram(&self) -> &[u16] {
+        &self.vram
+    }
+
+    pub const fn reg_as_mut_ref(&mut self, reg: u16) -> &mut u16 {
+        &mut self.registers[reg as usize]
+    }
+
+    pub const fn ireg_as_mut_ref(&mut self, reg: u16) -> &mut u16 {
+        &mut self.internal_registers[reg as usize]
+    }
+
+    pub const fn reg(&self, reg: u16) -> u16 {
+        self.registers[reg as usize]
+    }
+
+    pub const fn ireg(&self, reg: u16) -> u16 {
+        self.internal_registers[reg as usize]
+    }
+}
+
+/// Private interface for the emulator.
+impl Emulator {
+    const fn data(&mut self) -> u16 {
+        let pc = self.ireg(IREG_PC);
+        let ir = self.load(pc);
+        *self.pc_as_mut_ref() = pc.wrapping_add(1);
+        ir
+    }
+
+    const fn push(&mut self, value: u16) {
+        self.store(self.sp(), value);
+
+        let (sp, underflow) = self.sp().overflowing_sub(1);
+
+        *self.sp_as_mut_ref() = sp;
+        self.set_fr(Flags::STACK_UNDERFLOW, underflow);
+    }
+
+    const fn pop(&mut self) -> u16 {
+        let (sp, overflow) = self.sp().overflowing_add(1);
+
+        *self.sp_as_mut_ref() = sp;
+        self.set_fr(Flags::STACK_OVERFLOW, overflow);
+        self.load(self.sp())
+    }
+
+    const fn pc_as_mut_ref(&mut self) -> &mut u16 {
+        self.ireg_as_mut_ref(IREG_PC)
+    }
+
+    const fn sp(&self) -> u16 {
+        self.ireg(IREG_SP)
+    }
+
+    const fn sp_as_mut_ref(&mut self) -> &mut u16 {
+        self.ireg_as_mut_ref(IREG_SP)
+    }
+
+    const fn fr(&self) -> u16 {
+        self.ireg(IREG_FR)
+    }
+
+    const fn fr_as_mut_ref(&mut self) -> &mut u16 {
+        self.ireg_as_mut_ref(IREG_FR)
+    }
+
+    const fn ir(&self) -> u16 {
+        self.ireg(IREG_IR)
+    }
+
+    const fn fr_zero(&mut self) {
+        let x = self.rx();
+        let fr = self.fr();
+        *self.fr_as_mut_ref() = (fr & !Flags::ULA) | (Flags::ZERO * (x == 0) as u16);
+    }
+
+    const fn set_fr(&mut self, mask: u16, value: bool) {
+        let fr = *self.fr_as_mut_ref();
+        *self.fr_as_mut_ref() = (fr & !mask) | (value as u16 * mask);
+    }
+
+    const fn rx_as_mut_ref(&mut self) -> &mut u16 {
+        self.reg_as_mut_ref((self.ir() & 0b0000001110000000) >> 7)
+    }
+
+    const fn ri_as_mut_ref(&mut self) -> &mut u16 {
+        self.ireg_as_mut_ref(self.ir() & 0b0000000000111111)
+    }
+
+    const fn rx(&self) -> u16 {
+        self.reg((self.ir() & 0b0000001110000000) >> 7)
+    }
+
+    const fn ry(&self) -> u16 {
+        self.reg((self.ir() & 0b0000000001110000) >> 4)
+    }
+
+    const fn rz(&self) -> u16 {
+        self.reg((self.ir() & 0b0000000000001110) >> 1)
+    }
+
+    const fn ri(&self) -> u16 {
+        self.ireg(self.ir() & 0b0000000000111111)
+    }
+
+    const fn opcode(&mut self) -> u16 {
+        self.ir() & 0b1111110000000000
+    }
+
+    const fn c(&self) -> u16 {
+        self.ir() & 0b0000000000000001
+    }
+
+    const fn test(&self, cond: u16) -> bool {
+        let fr = self.fr();
+        match cond {
+            0b0000 => true,
+            0b0001 if fr & Flags::EQUAL == Flags::EQUAL => true,
+            0b0010 if fr & Flags::EQUAL == 0 => true,
+            0b0011 if fr & Flags::ZERO == Flags::ZERO => true,
+            0b0100 if fr & Flags::ZERO == 0 => true,
+            0b0101 if fr & Flags::CARRY == Flags::CARRY => true,
+            0b0110 if fr & Flags::CARRY == 0 => true,
+            0b0111 if fr & Flags::GREATER == Flags::GREATER => true,
+            0b1000 if fr & Flags::LESS == Flags::LESS => true,
+            0b1001
+                if (fr & Flags::EQUAL == Flags::EQUAL || fr & Flags::GREATER == Flags::GREATER) =>
+            {
+                true
+            }
+            0b1010 if (fr & Flags::EQUAL == Flags::EQUAL || fr & Flags::LESS == Flags::LESS) => {
+                true
+            }
+            0b1011 if fr & Flags::ARITHMETIC_OVERFLOW == Flags::ARITHMETIC_OVERFLOW => true,
+            0b1100 if fr & Flags::ARITHMETIC_OVERFLOW == 0 => true,
+            0b1101 if fr & Flags::NEGATIVE == Flags::NEGATIVE => true,
+            0b1110 if fr & Flags::DIV_BY_ZERO == Flags::DIV_BY_ZERO => true,
+            _ => false,
+        }
     }
 }
 
@@ -190,7 +316,7 @@ impl Iterator for Emulator {
             }
             OpCode::LOAD => {
                 let address = self.data();
-                *self.rx_as_mut_ref() = self.ram[address as usize];
+                *self.rx_as_mut_ref() = self.load(address);
                 Some(3)
             }
             OpCode::STOREI => {
@@ -199,7 +325,7 @@ impl Iterator for Emulator {
                 Some(2)
             }
             OpCode::LOADI => {
-                *self.rx_as_mut_ref() = self.ram[self.ry() as usize];
+                *self.rx_as_mut_ref() = self.load(self.ry());
                 Some(2)
             }
             OpCode::LOADN => {
@@ -425,187 +551,6 @@ impl Iterator for Emulator {
                 self.state = State::UnknownInstruction;
                 None
             }
-        }
-    }
-}
-
-impl Emulator {
-    #[inline(always)]
-    pub fn data(&mut self) -> u16 {
-        let pc = *self.pc();
-        let ir = self.ram[pc as usize];
-        *self.pc_as_mut_ref() = pc.wrapping_add(1);
-        ir
-    }
-
-    #[inline(always)]
-    pub fn push(&mut self, value: u16) {
-        self.ram[self.sp() as usize] = value;
-
-        let (sp, underflow) = self.sp().overflowing_sub(1);
-
-        *self.sp_as_mut_ref() = sp;
-        self.set_fr(Flags::STACK_UNDERFLOW, underflow);
-    }
-
-    #[inline(always)]
-    pub fn pop(&mut self) -> u16 {
-        let (sp, overflow) = self.sp().overflowing_add(1);
-
-        *self.sp_as_mut_ref() = sp;
-        self.set_fr(Flags::STACK_OVERFLOW, overflow);
-        self.ram[self.sp() as usize]
-    }
-
-    #[inline(always)]
-    pub fn pc(&self) -> &u16 {
-        self.ireg_as_ref(IREG_PC)
-    }
-
-    #[inline(always)]
-    pub fn pc_as_mut_ref(&mut self) -> &mut u16 {
-        self.ireg_as_mut_ref(IREG_PC)
-    }
-
-    #[inline(always)]
-    pub fn sp(&self) -> u16 {
-        self.ireg(IREG_SP)
-    }
-
-    #[inline(always)]
-    pub fn sp_as_mut_ref(&mut self) -> &mut u16 {
-        self.ireg_as_mut_ref(IREG_SP)
-    }
-
-    #[inline(always)]
-    pub fn fr(&self) -> u16 {
-        self.ireg(IREG_FR)
-    }
-
-    #[inline(always)]
-    pub fn fr_as_mut_ref(&mut self) -> &mut u16 {
-        self.ireg_as_mut_ref(IREG_FR)
-    }
-
-    #[inline(always)]
-    pub fn ir(&self) -> u16 {
-        self.ireg(IREG_IR)
-    }
-
-    #[inline(always)]
-    pub fn fr_zero(&mut self) {
-        let x = self.rx();
-        let fr = self.fr();
-        *self.fr_as_mut_ref() = (fr & !Flags::ULA) | (Flags::ZERO * (x == 0) as u16);
-    }
-
-    #[inline(always)]
-    pub fn set_fr(&mut self, mask: u16, value: bool) {
-        let fr = *self.fr_as_mut_ref();
-        *self.fr_as_mut_ref() = (fr & !mask) | (value as u16 * mask);
-    }
-
-    #[inline(always)]
-    pub fn rx_as_mut_ref(&mut self) -> &mut u16 {
-        self.reg_as_mut_ref((self.ir() & 0b0000001110000000) >> 7)
-    }
-
-    #[inline(always)]
-    pub fn ri_as_mut_ref(&mut self) -> &mut u16 {
-        self.ireg_as_mut_ref((self.ir() & 0b0000000000111111) >> 0)
-    }
-
-    #[inline(always)]
-    pub fn rx_as_ref(&self) -> &u16 {
-        self.reg_as_ref((self.ir() & 0b0000001110000000) >> 7)
-    }
-
-    #[inline(always)]
-    pub fn rx(&self) -> u16 {
-        self.reg((self.ir() & 0b0000001110000000) >> 7)
-    }
-
-    #[inline(always)]
-    pub fn ry(&self) -> u16 {
-        self.reg((self.ir() & 0b0000000001110000) >> 4)
-    }
-
-    #[inline(always)]
-    pub fn rz(&self) -> u16 {
-        self.reg((self.ir() & 0b0000000000001110) >> 1)
-    }
-
-    #[inline(always)]
-    pub fn ri(&self) -> u16 {
-        self.ireg((self.ir() & 0b0000000000111111) >> 0)
-    }
-
-    #[inline(always)]
-    pub fn opcode(&mut self) -> u16 {
-        self.ir() & 0b1111110000000000
-    }
-
-    #[inline(always)]
-    pub fn c(&self) -> u16 {
-        self.ir() & 0b0000000000000001
-    }
-
-    #[inline(always)]
-    pub fn reg_as_mut_ref(&mut self, reg: u16) -> &mut u16 {
-        &mut self.registers[reg as usize]
-    }
-
-    #[inline(always)]
-    pub fn ireg_as_mut_ref(&mut self, reg: u16) -> &mut u16 {
-        &mut self.internal_registers[reg as usize]
-    }
-
-    #[inline(always)]
-    pub fn reg_as_ref(&self, reg: u16) -> &u16 {
-        &self.registers[reg as usize]
-    }
-
-    #[inline(always)]
-    pub fn ireg_as_ref(&self, reg: u16) -> &u16 {
-        &self.internal_registers[reg as usize]
-    }
-
-    #[inline(always)]
-    pub fn reg(&self, reg: u16) -> u16 {
-        self.registers[reg as usize]
-    }
-
-    #[inline(always)]
-    pub fn ireg(&self, reg: u16) -> u16 {
-        self.internal_registers[reg as usize]
-    }
-
-    #[inline(always)]
-    pub fn test(&self, cond: u16) -> bool {
-        let fr = self.fr();
-        match cond {
-            0b0000 => true,
-            0b0001 if fr & Flags::EQUAL == Flags::EQUAL => true,
-            0b0010 if fr & Flags::EQUAL == 0 => true,
-            0b0011 if fr & Flags::ZERO == Flags::ZERO => true,
-            0b0100 if fr & Flags::ZERO == 0 => true,
-            0b0101 if fr & Flags::CARRY == Flags::CARRY => true,
-            0b0110 if fr & Flags::CARRY == 0 => true,
-            0b0111 if fr & Flags::GREATER == Flags::GREATER => true,
-            0b1000 if fr & Flags::LESS == Flags::LESS => true,
-            0b1001
-                if (fr & Flags::EQUAL == Flags::EQUAL || fr & Flags::GREATER == Flags::GREATER) =>
-            {
-                true
-            }
-            0b1010 if (fr & Flags::EQUAL == Flags::EQUAL || fr & Flags::LESS == Flags::LESS) => {
-                true
-            }
-            0b1011 if fr & Flags::ARITHMETIC_OVERFLOW == Flags::ARITHMETIC_OVERFLOW => true,
-            0b1100 if fr & Flags::ARITHMETIC_OVERFLOW == 0 => true,
-            0b1101 if fr & Flags::NEGATIVE == Flags::NEGATIVE => true,
-            0b1110 if fr & Flags::DIV_BY_ZERO == Flags::DIV_BY_ZERO => true,
-            _ => false,
         }
     }
 }
