@@ -1,5 +1,3 @@
-#![feature(bigint_helper_methods)]
-
 const IREG_FR: u16 = 0b000000;
 const IREG_SP: u16 = 0b000001;
 const IREG_PC: u16 = 0b000010;
